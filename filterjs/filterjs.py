@@ -54,6 +54,8 @@ class FilterJsSetOptions(object):
         self.filter = getattr(options, 'filter', 'FJS')
         self.override_filter_label = getattr(options, 'override_filter_label', None)
         self.override_filter_value = getattr(options, 'override_filter_value', None)
+        self.json_select_keys = getattr(options, 'json_select_keys', None)
+        self.json_exclude_keys = getattr(options, 'json_exclude_keys', None)
 
 class FilterJsSetMetaclass(type):
     def __new__(cls, name, bases, attrs):
@@ -84,9 +86,12 @@ class BaseFilterJsSet(object):
             #"Add an explicit 'Meta.fields' or 0 to the %s class." % cls.__name__
 
     def filter_data(cls):
+        assert not ((cls._meta.json_select_keys is not None) and (cls._meta.json_exclude_keys is not None)), \
+        """filter_data(): json_select_keys and json_exclude_keys are mutually exclusive,
+        use only one of them."""
         data = []
         for i in cls.queryset:
-            data.append(cls.to_dict(i))
+            data.append(to_dict(i, only=cls._meta.json_select_keys, exclude=cls._meta.json_exclude_keys))
         return data
 
     def render_criteria(cls):
@@ -127,9 +132,6 @@ class BaseFilterJsSet(object):
             values[k] = collections.OrderedDict(sorted(v.items()))
 
         return values
-
-    def json(self):
-        return json.dumps(self.filter_data(), indent=1)
 
     @classmethod
     def to_dict(cls, instance):
