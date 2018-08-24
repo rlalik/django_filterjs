@@ -18,7 +18,7 @@ from setuptools.command.test import test
 
 setup(
     name="django-filterjs",
-    version="0.0.1",
+    version="0.0.2",
     packages=['filterjs'],
     license="The MIT License (MIT)",
     include_package_data = True,

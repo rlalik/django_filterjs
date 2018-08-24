@@ -7,7 +7,7 @@ import json
 
 import collections
 
-def to_dict(instance, only = None, exclude = None):
+def to_dict(instance, only = None, exclude = None, groups = None):
     assert not ((only is not None) and (exclude is not None)), \
         """to_dict(): only and exclude are mutually exclusive,
         use only one of them."""
@@ -21,7 +21,12 @@ def to_dict(instance, only = None, exclude = None):
         if exclude is not None and f.name in exclude:
             continue
 
-        if isinstance(f, ManyToManyField):
+        if groups is not None and f.name in groups:
+            if groups[f.name] not in data:
+                data[groups[f.name]] = []
+            if f.value_from_object(instance):
+                data[groups[f.name]].append(f.name)
+        elif isinstance(f, ManyToManyField):
             if instance.pk is None:
                 data[f.name] = []
             else:
@@ -51,6 +56,8 @@ class FilterJsSetOptions(object):
     def __init__(self, options=None):
         self.model = getattr(options, 'model', None)
         self.fields = getattr(options, 'fields', None)
+        self.fields_groups = getattr(options, 'fields_groups', [])
+        self.nosort = getattr(options, 'nosort', [])
         self.filter = getattr(options, 'filter', 'FJS')
         self.override_filter_label = getattr(options, 'override_filter_label', None)
         self.override_filter_value = getattr(options, 'override_filter_value', None)
@@ -91,16 +98,26 @@ class BaseFilterJsSet(object):
         use only one of them."""
         data = []
         for i in cls.queryset:
-            data.append(to_dict(i, only=cls._meta.json_select_keys, exclude=cls._meta.json_exclude_keys))
+            data.append(
+                to_dict(i,
+                        only=cls._meta.json_select_keys,
+                        exclude=cls._meta.json_exclude_keys,
+                        groups=cls._meta.fields_groups
+                )
+            )
         return data
 
     def render_criteria(cls):
         criteria = []
-        for field in cls._meta.model._meta.get_fields():
-            if field.name in cls._meta.fields:
-                c = "{:s}.addCriteria({{ field:'{:s}', ele : '#id_{:s} input:checkbox', all:'all' }});".format(
-                    cls._meta.filter, field.name, field.name)
-                criteria.append(c)
+        #for field in cls._meta.model._meta.get_fields():
+            #if field.name in cls._meta.fields or field.name in cls._meta.fields_groups:
+                #c = "{:s}.addCriteria({{ field:'{:s}', ele : '#id_{:s} input:checkbox', all:'all' }});".format(
+                    #cls._meta.filter, field.name, field.name)
+                #criteria.append(c)
+        for field in cls._meta.fields:
+            c = "{:s}.addCriteria({{ field:'{:s}', ele : '#id_{:s} input:checkbox', all:'all' }});".format(
+                cls._meta.filter, field, field)
+            criteria.append(c)
         return criteria
 
     def count_values(cls):
@@ -108,11 +125,27 @@ class BaseFilterJsSet(object):
         for field in cls._meta.fields:
                 values[field] = {}
 
+        for k, v in cls._meta.fields_groups.items():
+            values[v][k] = { 'all' : 0 }
+
         for instance in cls.queryset:
             for f in instance._meta.concrete_fields + instance._meta.many_to_many:
-                if f.name not in cls._meta.fields:
-                    continue
                 v = []
+                fname = f.name
+
+                found_in_group = False
+                # if field is not in fields
+                if f.name not in cls._meta.fields:
+
+                    # check if field is in a group
+                    if f.name in cls._meta.fields_groups:
+                        fname = cls._meta.fields_groups[f.name]
+                        if f.value_from_object(instance):
+                            v = [ str(f.name) ]
+                            found_in_group = True
+
+                    if not found_in_group:
+                        continue
                 if isinstance(f, ManyToManyField):
                     if instance.pk is not None:
                         #v = list(f.value_from_object(instance).values_list(f.name, flat=True))ll = []
@@ -120,16 +153,17 @@ class BaseFilterJsSet(object):
                         for i in f.value_from_object(instance):
                             ll.append(str(i))
                         v = sorted(ll)
-                else:
+                elif not found_in_group:
                     v = [ str(f.value_from_object(instance)) ]
                 for _v in v:
-                    if _v in values[f.name]:
-                        values[f.name][_v]['all'] += 1
+                    if _v in values[fname]:
+                        values[fname][_v]['all'] += 1
                     else:
-                        values[f.name][_v] = { 'all' : 1 }
+                        values[fname][_v] = { 'all' : 1 }
 
         for k, v in values.items():
-            values[k] = collections.OrderedDict(sorted(v.items()))
+            if k not in cls._meta.nosort:
+                values[k] = collections.OrderedDict(sorted(v.items()))
 
         return values
 
